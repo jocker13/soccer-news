@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>News to X</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; background: #0f1115; color: #e8e8e8; }
+  h1 { font-size: 20px; }
+  input[type=text] { width: 70%; padding: 8px; border-radius: 6px; border: 1px solid #333; background: #1a1d23; color: #fff; }
+  button { padding: 8px 14px; border-radius: 6px; border: none; background: #1d9bf0; color: #fff; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .article { border: 1px solid #2a2d33; border-radius: 8px; padding: 14px; margin: 12px 0; background: #15181d; }
+  .article h3 { margin: 0 0 6px; font-size: 15px; }
+  .article p { font-size: 13px; color: #aaa; margin: 4px 0; }
+  .article img { max-width: 100%; border-radius: 6px; margin-bottom: 8px; display: block; }
+  .preview-img { max-width: 100%; border-radius: 6px; margin-top: 8px; display: block; }
+  textarea { width: 100%; height: 90px; margin-top: 8px; background: #1a1d23; color: #fff; border: 1px solid #333; border-radius: 6px; padding: 8px; font-family: inherit; }
+  .status { font-size: 13px; margin-top: 6px; }
+  .status.ok { color: #4caf50; }
+  .status.err { color: #f44336; }
+</style>
+</head>
+<body>
+  <h1>Berita Bola (RSS) &rarr; Draft Tweet (Groq) &rarr; Post ke X</h1>
+  <div>
+    <input type="text" id="query" placeholder="filter opsional, misal: Liverpool (kosongkan = semua berita terbaru)">
+    <button onclick="searchNews()">Cari</button>
+  </div>
+  <div id="results"></div>
+
+<script>
+async function searchNews() {
+  const q = document.getElementById('query').value.trim();
+  const box = document.getElementById('results');
+  box.innerHTML = 'Mencari...';
+  const res = await fetch(`/api/news?q=${encodeURIComponent(q)}`);
+  const data = await res.json();
+  if (data.error) { box.innerHTML = `<p class="status err">${data.error}</p>`; return; }
+  box.innerHTML = '';
+  data.articles.forEach((a, i) => {
+    const div = document.createElement('div');
+    div.className = 'article';
+    div.innerHTML = `
+      ${a.image ? `<img src="${a.image}" alt="">` : ''}
+      <h3>${a.title ?? ''}</h3>
+      <p>${a.source ?? ''}</p>
+      <p>${a.description ?? ''}</p>
+      <button onclick='generateTweet(${i})'>Buat Draft Tweet</button>
+      <div id="gen-${i}"></div>
+    `;
+    div.dataset.article = JSON.stringify(a);
+    box.appendChild(div);
+  });
+  window.__articles = data.articles;
+}
+
+async function generateTweet(i) {
+  const a = window.__articles[i];
+  const slot = document.getElementById(`gen-${i}`);
+  slot.innerHTML = 'Generate draft...';
+  const res = await fetch('/api/generate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(a)
+  });
+  const data = await res.json();
+  if (data.error) { slot.innerHTML = `<p class="status err">${data.error}</p>`; return; }
+  slot.innerHTML = `
+    <textarea id="tweet-${i}">${data.tweet}</textarea>
+    ${data.image ? `<img class="preview-img" src="${data.image}" alt="">` : ''}
+    <div><button onclick='postTweet(${i})'>Post ke X</button></div>
+    <div id="post-status-${i}" class="status"></div>
+  `;
+  window.__gen = window.__gen || {};
+  window.__gen[i] = { image: data.image };
+}
+
+async function postTweet(i) {
+  const text = document.getElementById(`tweet-${i}`).value;
+  const image = (window.__gen && window.__gen[i]) ? window.__gen[i].image : null;
+  const statusEl = document.getElementById(`post-status-${i}`);
+  statusEl.textContent = 'Posting...';
+  statusEl.className = 'status';
+  const res = await fetch('/api/post', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text, image})
+  });
+  const data = await res.json();
+  if (data.error) {
+    statusEl.textContent = data.error;
+    statusEl.className = 'status err';
+  } else {
+    statusEl.textContent = `Posted. id: ${data.tweet_id}`;
+    statusEl.className = 'status ok';
+  }
+}
+</script>
+</body>
+</html>
